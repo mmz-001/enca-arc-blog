@@ -1,0 +1,46 @@
+{
+  "name": "enca-blog",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@mdx-js/rollup": "^3.1.1",
+    "@stdlib/ndarray": "^0.3.3",
+    "@tailwindcss/vite": "^4.1.13",
+    "@types/mdx": "^2.0.13",
+    "@xstate/react": "^6.0.0",
+    "classcat": "^5.0.5",
+    "eslint-plugin-react": "^7.37.5",
+    "katex": "^0.16.22",
+    "lucide-react": "^0.544.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "tailwindcss": "^4.1.13",
+    "xstate": "^5.22.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.35.0",
+    "@stdlib/types": "^0.4.3",
+    "@tailwindcss/typography": "^0.5.18",
+    "@types/react": "^19.1.13",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.2",
+    "eslint": "^9.35.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.20",
+    "globals": "^16.4.0",
+    "typescript": "~5.8.3",
+    "typescript-eslint": "^8.43.0",
+    "vite": "^7.1.6"
+  },
+  "packageManager": "pnpm@8.7.1+sha512.41bb77121614697152da4e052d003baf6fde633fc9a03786ebcd3fdd45c6d066b4dcb3ee6381a076f08b7beccedcced99d61b8548e1b03093b4292727ebe5ea8"
+}

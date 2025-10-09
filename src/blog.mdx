@@ -1,0 +1,702 @@
+import {CGoLRulesDiagram} from './components/cgol-rules'
+import {CGoLDemos} from './components/cgol-demos'
+import {ARCTask} from './components/arc-task'
+import {ARCCAHC} from './components/arc-ca-hc'
+import {LinearNCA} from './components/linear-nca'
+import {ENCA} from './components/enca'
+import {ArchDiag} from './components/arch-diag'
+import {PhotosensitivityWarning} from './components/pse-warning'
+import {NeighborhoodDiagram} from './components/neighborhood-diagram'
+
+<PhotosensitivityWarning/>
+
+# Efficiently Solving ARC-AGI with Evolved Neural Cellular Automata (ENCA)
+
+
+Conway's Game of Life shows how complexity arises from simple rules, but it can't learn. How can this concept be adapted for novel reasoning tasks? This post answers that question by starting with a simple cellular automaton and methodically adding components to build an Evolved Neural Cellular Automaton (ENCA) capable of solving ARC-AGI tasks.
+
+- Source code: [enca-arc](https://github.com/mmz-001/enca-arc)
+- Experiment artifacts: [enca-arc-experiments](https://github.com/mmz-001/enca-arc-experiments)
+- Blog source code: [enca-arc-blog](https://github.com/mmz-001/enca-arc-blog)
+
+## Conway's Game of Life
+
+Conway's Game of Life (CGoL) is a classic example of a cellular automaton (CA) that shows how complex behaviors can emerge from simple rules.
+
+The setup:
+
+- The game world consists of an infinite two-dimensional grid of square cells.
+- Each cell can be in one of two states: **alive** or **dead**.
+
+The grid evolves in discrete time steps (generations). The state of a cell $S^{t+1}_{i, j}$ in the next generation is determined by its eight immediate neighbors (Moore neighborhood) in the current generation using these four simple rules applied to all cells simultaneously:
+
+<CGoLRulesDiagram/>
+
+These simple rules can create a variety of complex behaviors as shown below:
+
+<CGoLDemos/>
+{/* Visualization of block, blinker, glider, and pulsar  */}
+
+CGoL is a simple example of emergent complexity and is Turing-complete, meaning anything that can be computed algorithmically can be computed within CGoL. People have built digital clocks[^1] and even a computer that runs CGoL inside CGoL![^2]
+
+If such a simple set of rules is as powerful as a Turing machine, can we build CAs that show intelligent behavior?
+
+## Abstraction and Reasoning Corpus for Artificial General Intelligence (ARC-AGI)
+
+François Chollet defines AGI as a system that can efficiently acquire new skills outside of its training data. In other words, the system can adapt to novel problems that its developers did not anticipate.
+
+ARC-AGI benchmark consists of grid-based visual reasoning problems. A task includes a small number of input-output training pairs (usually around 3), and the test-taker must deduce the correct output grid for a new test input grid. An easy example task from the ARC-AGI-1 training corpus is given below:
+
+
+<ARCTask id={"6f8cd79b"}/>
+{/* ARC-AGI-1 Task (#6f8cd79b) */}
+
+
+Here's a harder one:
+
+<ARCTask id={"d406998b"}/>
+{/* ARC-AGI-1 Task (#d406998b) */}
+
+
+
+Now, given the remarkable emergent complexity of CGoL, can we build a CA to solve ARC-AGI tasks?
+
+## Crafting CAs for ARC-AGI Tasks
+
+Task `#6f8cd79b` is relatively easy; the rule is to fill the border with teal squares. A not-so-simple way to solve this problem is to encode the problem and its rules into a "programming language" built with CGoL, run the corresponding algorithm, and decode the results back into the grid format. There are three problems with this approach:
+
+
+
+1. Creating a general purpose computer in CGoL is extremely tedious.
+2. Encoding and decoding the problem back and forth between the ARC grid format and internal representation format.
+3. Requiring a large amount of grid space compared to the task grids, which have a maximum size of $30\times 30$.
+
+Can we solve the problem entirely in ARC grid space? Yes - we can use this 2‑channel CA:
+
+Let's introduce a hidden state $S_{\text{hid}}$ in addition to the visible state $S_{\text{vis}}$ used as the final answer. Hidden states are used as a scratchpad for intermediate calculations; think of it like working memory. Now, each cell in the grid has 2 channels $S^{t}=[S^{t}_{\text{vis}},\,S^{t}_{\text{hid}}] \in\{0,1\}^2$ 
+
+- New rules [^3]:
+  1) Use a Moore neighborhood (8-neighborhood) similar to CGoL but treat out-of-bounds cells as $0$.
+  2) If $S^{t}_{\text{vis}}=0$ and $S^{t}_{\text{hid}}=0$, set $S^{t+1}=[0, 1]$
+  3) If $S^{t}_{\text{hid}}=1$ and the number of alive hidden neighbors is $3$ or $5$, set $S^{t+1}=[1, 1]$.
+  4) Otherwise set $S^{t+1}=[0, 1]$.
+
+
+Running this CA until convergence solves the task. Exercise: solve this without using a hidden channel.
+
+<ARCCAHC />
+{/* Animation */}
+
+Two questions:
+1. Is this method expressive enough to solve (almost) all ARC-AGI problems?
+2. Can we automate the creation of such CAs through machine learning methods?
+
+To answer the first question, I'll provide some empirical evidence that this may be possible: [CAPED](https://ferenczi.itch.io/caped) is a tool for designing CAs and has a collection of CA programs that can solve ARC-AGI tasks. Try solving some unsolved tasks to get an idea on what kind of problems CAs can solve. Since CAs are Turing-complete, they should be able to solve any ARC-AGI problem, at least in theory.
+
+To answer the second question, we're going to use a neural network to learn the CA rules to solve ARC-AGI tasks.
+
+## Neural Cellular Automata (NCA)
+
+<ArchDiag/>
+
+
+CAs operate on a grid of cells consisting of binary values (alive or dead) using a fixed set of rules. 
+NCAs extend this idea by using a neural network to compute the next state and allow continuous cell values. NCAs have been used to model morphogenesis[^4], solve mazes[^5], classify handwritten digits[^6], and generate images[^7]. The works by Guichard et al.[^8] and Xu et al.[^9] showed that NCAs are capable of solving ARC tasks, which got me interested in this line of research. 
+
+The final architecture of ENCA differs significantly from previous NCA architectures by being much **simpler**, requiring **no backpropagation**, and using **several orders of magnitude fewer parameters**, while **achieving better accuracy**. Let's first understand the key components of the ENCA architecture by starting from the simplest NCAs and gradually adding structure to arrive at the final architecture.
+
+### Linear Neighborhood Model
+
+{/* Visualization of a simple linear NCA */}
+
+The simplest "neural" CA updates each cell by a weighted sum of its $3 \times 3$ neighborhood plus a bias:
+
+ - Let $S^{t}_{i,j}\in\mathbb{R}$ be the state of the cell at position $(i, j)$ at time $t$.
+ - Let $U = \{-1,0,1\}$ and $N = U \times U$ be the $3 \times 3$ neighborhood offsets.
+ - Let $W\in\mathbb{R}^{3\times3}$ be the kernel with $W_{u, v}$ indexed by offsets $(u, v) \in N$, where $(0, 0)$ is the center.
+ - Let $b\in\mathbb{R}$ be the bias.
+
+ 
+
+Update: 
+$$
+S^{t+1}_{i,j}
+= b + \sum_{(u,v)\in N} W_{u,v}\, S^{t}_{i+u,\,j+v}
+$$
+
+Every cell uses the **exact same** set of parameters $W$ and $b$ to compute the next state. 
+
+This linear model is already expressive enough to reproduce simple smoothing/diffusion-like behavior. However, without nonlinearity it cannot implement discrete rules such as CGoL's birth/survival.
+
+<LinearNCA />
+
+### Adding an Activation Function
+
+Let's introduce an activation function $\sigma: \mathbb{R} \to [0, 1]$ to enable thresholding and richer dynamics:
+
+$$
+\begin{aligned}
+x^{t}_{i,j}&=b + \sum\nolimits_{(u,v)\in N} W_{u,v}\, S^{t}_{i+u,\,j+v} \\
+
+S^{t+1}_{i,j} &= \sigma \left( x^{t}_{i,j} \right)
+\end{aligned}
+$$
+
+With this modification we can now build an NCA equivalent to CGoL:
+
+Choose weights and bias:
+$$
+W=\begin{bmatrix}
+1 & 1 & 1\\
+1 & 9 & 1\\
+1 & 1 & 1
+\end{bmatrix},
+\qquad
+b=0.
+$$
+
+Use a hard-threshold activation that reproduces CGoL's rules:
+$$
+\sigma(x)=
+\begin{cases}
+1, & x\in\{3,\,11,\,12\}\\
+0, & \text{otherwise.}
+\end{cases}
+$$
+
+Let's compute the cell states for three representative cases. Operation $\odot$ denotes elementwise product followed by summation.
+
+Birth (dead cell with 3 live neighbors):
+$$
+\underbrace{
+\begin{bmatrix}
+0&1&0\\
+1&0&1\\
+0&0&0
+\end{bmatrix}
+}_{\text{local }S^t}
+\odot
+\underbrace{
+\begin{bmatrix}
+1&1&1\\
+1&9&1\\
+1&1&1
+\end{bmatrix}
+}_{W}
+=
+3
+\Rightarrow
+\sigma(3)=1.
+$$
+
+Survival (live cell with 2 neighbors):
+$$
+\underbrace{
+\begin{bmatrix}
+0&1&0\\
+0&1&1\\
+0&0&0
+\end{bmatrix}
+}_{\text{local }S^t}
+\odot
+\underbrace{
+\begin{bmatrix}
+1&1&1\\
+1&9&1\\
+1&1&1
+\end{bmatrix}
+}_{W}
+=
+11
+\Rightarrow
+\sigma(11)=1.
+$$
+
+Survival (live cell with 3 neighbors):
+$$
+\underbrace{
+\begin{bmatrix}
+1&0&1\\
+0&1&1\\
+0&0&0
+\end{bmatrix}
+}_{\text{local }S^t}
+\odot
+\underbrace{
+\begin{bmatrix}
+1&1&1\\
+1&9&1\\
+1&1&1
+\end{bmatrix}
+}_{W}
+=
+12
+\Rightarrow
+\sigma(12)=1.
+$$
+
+All other sums map to 0 (death).
+
+ENCA simply uses a $[0, 1]$ clamp for the activation function:
+
+$$
+\sigma(x) = \max(0, \min(x, 1))
+$$
+
+### Von Neumann Neighborhood
+
+To extend NCAs to different neighborhood types, let's first simplify the notation. Let $K$ be the number of elements of an arbitrary neighborhood around a cell including the center cell. Let's flatten the weight matrix to $W \in \mathbb{R}^{K}$ and let $N^{t}_{i, j} \in \mathbb{R}^K$ be the flattened neighborhood around a cell at position $(i, j)$ at time $t$. Both $N^{t}_{i, j}$ and $W$ use the same indexing scheme.
+Let's simplify the update rule to:
+
+$$
+\begin{aligned}
+x^{t}_{i,j} &= b + W \cdot N^{t}_{i,j}\\
+
+S^{t+1}_{i,j} &= \sigma\!\left( x^{t}_{i,j} \right) \in [0,1]
+\end{aligned}
+$$
+
+ENCA uses a von Neumann neighborhood composed of the central cell and its four adjacent cells. This minimizes the number of parameters compared to a Moore neighborhood.
+
+<NeighborhoodDiagram/>
+{/* von Neumann and Moore Neighborhood diagram with indexing schemes*/}
+
+### Adding Channels
+
+ARC grids use 10 colors represented by indices $c\in\{0,\dots,9\}$. Let's extend the model by giving each cell a $C$-dimensional state vector, allowing its output to be decoded into a specific color:
+
+$$
+S_{i,j}\in [0,1]^C
+$$
+
+Let's call this multi-channel grid the substrate $S$ to differentiate it from the ARC grid $G$. 
+$$
+\begin{aligned}
+S &\in [0,1]^{H \times W \times C} \\
+
+G &\in \{0,...,9\}^{H \times W}
+\end{aligned}
+$$
+
+To convert between $S$ and $G$, let's use an encoding function $E$ and decoding function $D$ applied pointwise:
+
+$$
+\begin{aligned}
+E &: \{0,\dots,9\}\to\ [0,1]^C \\
+
+D &: [0,1]^C\to\{0,\dots,9\}
+\end{aligned}
+$$
+
+
+We can use a 10-bit one-hot encoding, RGB encoding, or a 4-bit binary encoding. ENCA uses a 4-bit encoding to minimize the parameter count and to keep final states near-discrete.
+
+### Multi-channel Update Rule
+
+We need a new update rule to allow the NCA to compute the cell's next state by "looking" at all the neighborhood channels.
+
+With $C$ channels per cell, let's update all channels jointly using a single linear map with a channel-wise bias, followed by a pointwise activation.
+
+- For each channel $c \in \{1,\dots,C\}$, let $N^{t,c}_{i,j} \in \mathbb{R}^K$ be the flattened $K$-neighborhood around $(i,j)$ at time $t$ (same indexing as above).
+- Let $D = KC$ be the input dimensionality and $W \in \mathbb{R}^{C \times D}$ and $b \in \mathbb{R}^{C}$.
+- Let $P^{t}_{i,j}$ be the input perception vector constructed by concatenating the channels:
+$$
+P^{t}_{i,j} = \bigl[\,N^{t,1}_{i,j};\dots;N^{t,C}_{i,j}\,\bigr] \in \mathbb{R}^{D}.
+$$
+
+
+Pre-activation:
+$$
+x^{t}_{i,j} = b + W\,P^{t}_{i,j} \in \mathbb{R}^{C}
+$$
+
+Activation:
+$$
+S^{t+1}_{i,j} = \sigma\!\bigl(x^{t}_{i,j}\bigr) \in [0,1]^C
+$$
+
+
+
+### Adding Hidden Channels
+
+We used a hidden channel to store intermediate results for task `#6f8cd79b`. Let's extend the current NCA model by adding $H$ hidden channels. 
+
+Let $V$ be the number of visible channels. This gives us $C = V + H$ total channels with input dimensionality $D = K(V + H)$. The new perception vector is constructed by concatenating the visible and hidden channels:
+
+$$
+P^{t}_{i,j} = \bigl[\,\underbrace{N^{t,1}_{i,j};\dots;N^{t,V}_{i,j}}_{\text{visible}}\,;\,\underbrace{N^{t,V + 1}_{i,j};\dots;N^{t,V + H}_{i,j}}_{\text{hidden}} \,\bigr] \in [0,1]^{D}.
+$$
+
+The update rules remain unchanged since we also update the hidden channels.
+
+### Adding Immutable Channels
+
+NCAs are somewhat resilient to noise during inference but this can have drawbacks when producing exact solutions. The solution to certain ARC-AGI tasks can change if even one pixel is altered. This means the NCA must maintain all information related to a given task during inference without corruption to output the correct answer. 
+
+We can mitigate information loss/corruption by giving an immutable copy of the visible channels to the NCA. These are called $V_{ro}$ read-only (RO) channels. The writable channels $V_{rw}$ are called read-write channels (RW). The total number of visible channels is $V = V_{ro} + V_{rw}$.
+
+Now we have $C_I = V_{ro} + V_{rw} + H = V + H$  input channels and $C_O = V_{rw} + H$ output channels.
+
+The input dimensionality is $D = KC_I$ which makes $W \in \mathbb{R}^{C_O \times D}$. 
+
+The perception vector is the concatenation of the visible RO, visible RW, and hidden channels:
+
+$$
+P^{t}_{i,j} = \bigl[
+  \,\underbrace{N^{t,1}_{i,j};\dots;N^{t,V_{ro}}_{i,j}}_{\text{visible RO}}\,;
+  \,\underbrace{N^{t,V_{ro} + 1}_{i,j};\dots;N^{t,V}_{i,j}}_{\text{visible RW}}\,;
+  \,\underbrace{N^{t,V + 1}_{i,j};\dots;N^{t,C_I}_{i,j}}_{\text{hidden}} \,\bigr] \in [0,1]^{D}.
+$$
+
+The read-only channels are passed through unchanged, while the read-write and hidden channels are updated. Let $S^{t, \text{RO}}_{i,j}$ be the vector of read-only 
+channels at cell $(i,j)$ at time $t$. The full state update is:
+
+$$
+\begin{aligned}
+x^{t}_{i,j} &= b + W\,P^{t}_{i,j} \in \mathbb{R}^{C_O} \\
+S^{t+1}_{i,j} &= \bigl[S^{t, \text{RO}}_{i,j} ; \sigma(x^{t}_{i,j})\bigr] \in [0,1]^{C_I}
+\end{aligned}
+$$
+
+
+ENCA uses one hidden channel, making $C_O = 5$. This gives us a total parameter count of 230:
+$$
+n_\text{params} = n_W + n_b = C_O D + C_O = 225 + 5 = 230
+$$
+
+### Alive Masking
+
+The current model can fail to converge in regions with small cell values. A simple fix is to ignore neighbors with cell values less than a threshold $\alpha$. Any cell value less than $\alpha$ is considered "dead", otherwise "alive."
+
+This alive masking is implemented by thresholding each neighborhood vector before it is used to construct the perception vector. For each channel $c$, the masked neighborhood $\tilde{N}^{t,c}_{i,j}$ is computed as follows:
+$$
+(\tilde{N}^{t,c}_{i,j})_k =
+\begin{cases}
+(N^{t,c}_{i,j})_k & \text{if } (N^{t,c}_{i,j})_k \geq \alpha \\
+0 & \text{otherwise}
+\end{cases}
+$$
+for each component $k \in \{1,\dots,K\}$. 
+
+The perception vector $\tilde{P}^{t}_{i,j}$ is constructed from these masked neighborhoods:
+$$
+\tilde{P}^{t}_{i,j} = \bigl[\,\tilde{N}^{t,1}_{i,j};\dots;\tilde{N}^{t,C_I}_{i,j}\,\bigr]
+$$
+
+
+### Inference
+
+During inference, the input grid is encoded into an initial substrate. The NCA then runs for $T$ steps until termination. Termination is defined as reaching the maximum number of steps $T_\text{max}$, or substrate convergence, whichever comes first.
+
+Convergence is reached when the maximum absolute change between consecutive substrates drops below a threshold, $\epsilon_{\text{conv}}$:
+$$
+\max_{i,j,c} |S^{t}_{i,j,c} - S^{t-1}_{i,j,c}| < \epsilon_{\text{conv}}
+$$
+
+Let's denote the entire inference process for an NCA with parameters $\theta = (W, b)$ on an initial substrate $S^0$ as $\text{NCA}_{\theta}\bigl(S^0\bigr) = S^T$, where $S^T$ is the final substrate after termination. The resulting substrate is decoded to produce the output grid.
+
+ENCA uses $\epsilon_{\text{conv}} = 0.25$.
+
+
+### Handling Unseen Colors
+
+Some test grids contain colors not present in the training set. The current architecture does not generalize well to unseen colors. A simple way to fix this is remapping the test grid colors to a random permutation of the training set colors. While a single permutation often yields random noise, applying this process multiple times can produce a correct solution through majority vote.
+
+Note this is an inference-time augmentation and is quite cheap compared to training. Inference time is less than 1 ms on average in my Rust implementation, so I chose to do up to 1,000 random unique permutations.
+
+## Training a Single NCA
+
+Gradient-based methods used for training NCAs such as backpropagation through time (BPTT) are computationally intensive, suffer from exploding/vanishing gradients and get stuck in local optima. Given the small number of parameters we can use a much simpler and robust evolutionary algorithm for parameter optimization. 
+
+After experimenting with various evolutionary algorithms such as particle swarm optimization, genetic algorithms, etc., I found that covariance matrix adaptation evolution strategy (CMA-ES) performed best. CMA-ES is a derivative-free optimization algorithm for non-linear or non-convex continuous optimization problems. For a beginner introduction to CMA-ES and evolution strategies check out this blog post: [A Visual Guide to Evolution Strategies](https://blog.otoro.net/2017/10/29/visual-evolution-strategies/)
+
+
+### Fitness function
+
+Let's use the negative mean pixelwise mean squared error (MSE) between the substrate's visible output channels and the encoded ground‑truth grids as the fitness function for CMA-ES.
+
+Let the training set be:
+$$
+\mathcal{D}=\{(G^{(m)}_{\text{in}},\, G^{(m)}_{\text{out}})\}_{m=1}^{M}
+$$
+
+Where $M$ is the number of training examples for a given task.
+
+For each pair, we initialize the substrate $S^{0, (m)}$ by encoding the input grid $G^{(m)}_{\text{in}}$. The encoder $E$ is modified such that the read-only visible channels are encoded using the original encoder and the hidden channels and read-write visible channels are initialized to zero. The decoder $D$ is modified similarly.
+
+We then run the NCA until termination:
+
+
+$$
+S^{T, (m)} = \text{NCA}_{\theta}\bigl(S^{0, (m)}\bigr)
+$$
+
+The target substrate $T^{(m)}$ is constructed from the output grid $G^{(m)}_{\text{out}}$ encoded into the read-write visible channels.
+
+The per‑example pixelwise MSE (computed in substrate space on the visible RW channels) is:
+$$
+\mathcal{L}^{(m)} \;=\; \frac{1}{H_m W_m V_{\text{rw}}}\!
+\sum_{i=1}^{H_m}\sum_{j=1}^{W_m}\sum_{c=V_{ro}+1}^{V}
+\Bigl(S^{T,(m)}_{i,j,c} - T^{(m)}_{i,j,c}\Bigr)^2
+$$
+
+Let's aggregate over the training set using the mean:
+$$
+J(\theta) = \frac{1}{M}\sum_{m=1}^{M}\mathcal{L}^{(m)}
+$$
+
+When using an optimizer that maximizes fitness, we take:
+$$
+f(\theta) = -\,J(\theta)
+$$
+
+Training starts with all parameters initialized to zero.
+
+### Single NCA Analysis
+
+Given a single NCA has only 230 parameters, its performance is surprisingly strong. This simple architecture gets 4.3% on the ARC-AGI-1 training set, solving 18 out of 416 total test grids[^10]. 
+
+The current architecture cannot handle tasks with unequal input and output grid sizes[^11], so these tasks are given a **score of 0**. For the ARC-AGI-1 training set, there are 268 compatible test grids and 262 compatible tasks. Only considering compatible grids, we get an accuracy of 6.72%. Per-task cost (USD), considering only compatible tasks is $5.89\times10^{-5}$.
+
+Let's see some NCAs in action[^12]. 
+
+Task `5168d44c` requires moving the red square right or down depending on the orientation.
+
+<ARCTask id={"5168d44c"} />
+
+The trained NCA solves all the train inputs and it correctly generalizes to the unseen test input. The hidden channel (idx=8) marks the target position for the new square's center.
+
+<ENCA taskId={"5168d44c"} />
+
+
+Task `a5f85a15` involves filling the even positions of the diagonal stripes with yellow squares. The test input contains a color not seen during training, thus requiring color remapping.
+
+<ARCTask id={"a5f85a15"} />
+
+A commonly occurring theme in ENCAs is that they can find a solution without converging. Initially, I thought this was undesirable behavior and tried to regularize the fitness function by heavily penalizing solutions that didn't converge, but this led to reduced accuracy.
+
+<ENCA taskId={"a5f85a15"} />
+
+Now, let's look at a failure case. 
+
+<ARCTask id={"0ca9ddb6"} />
+
+You need to apply two rules to solve task `0ca9ddb6` and the ENCA applies one rule almost correctly. This is the observation that led me to the multi-NCA architecture: the partial solution of one ENCA can be used as a starting point for another ENCA.
+
+<ENCA taskId={"0ca9ddb6"} />
+
+## Multi-NCA Architecture
+
+A single NCA is not sufficient to solve most ARC-AGI tasks. However, it can produce partial/intermediate solutions that can be refined/composed to produce the correct solution. 
+
+This is the core idea behind the multi-NCA architecture: **the output of one NCA serves as the input for the next.**
+
+An ensemble consists of a sequence of $L$ NCAs. Let the parameters of the $l$-th NCA be $\theta_l = (W_l, b_l)$. The ensemble is executed sequentially.
+
+First, the input grid $G_{\text{in}}$ is encoded into the initial substrate $S^{(0)} = E(G_{\text{in}})$. This substrate is fed into the first NCA in the sequence, which runs until termination to produce an output substrate:
+
+$$
+S^{(1)} = \text{NCA}_{\theta_1}\bigl(S^{(0)}\bigr)
+$$
+
+For each subsequent NCA in the sequence, the hidden channels of the previous NCA's output substrate are reset to zero. This cleared substrate is then used as the input for the next NCA. Let $R$ be the operator that resets the hidden channels of a substrate. For $l=2, \dots, L$, the process is:
+
+$$
+S^{(l)} = \text{NCA}_{\theta_l}\bigl(R(S^{(l-1)})\bigr)
+$$
+
+The final output of the ensemble is the output of the last NCA, $S^{(L)}$, which is then decoded to produce the final grid.
+
+
+## Training a Multi-NCA with Evolutionary Search
+
+Training a multi-NCA isn't as straightforward as training a single NCA. Jointly optimizing the multi-NCA's parameters using CMA-ES becomes computationally intensive, and in practice it gets stuck in local optima. I found that sequentially training each NCA performs best but this introduces two problems:
+
+1. The previous NCA's intermediate results may be suboptimal for solving the task.
+2. No clear separation of responsibility among NCAs. 
+
+To get an idea of these problems suppose a task requires performing three sequential steps $A$, $B$, and $C$. These could be infilling, recoloring, drawing borders, moving objects, etc. An example of problem 1 is the intermediate NCAs performing $A$ and $D$ where $D$ is not related to the task but increases the overall fitness. Problem 2 occurs when an NCA performs $A$ and only partially does step $B$, making it difficult for the next NCA to find a simple rule to complete step $B$. This can occur when a single NCA tries to do "too much" or when it fails to converge.
+
+ENCA mitigates problem 1 by introducing an evolutionary search method to find optimal intermediate NCAs. Problem 2 can be mitigated by modifying the fitness function.
+
+### Evolutionary Search Algorithm
+
+The search algorithm constructs the ensembles layer by layer. It maintains a population of $P$ candidate ensembles and evolves them over several stages. Each stage adds and trains a new NCA for every ensemble in the population.
+
+**Initialization**: The process starts with a population of $P$ individuals, each containing an ensemble with one zero-initialized NCA.
+
+The training then proceeds iteratively. For each stage, from the first NCA up to a maximum of $L_{\text{max}}$:
+1.  **Optimization**: For each ensemble in the population, the most recently added NCA is trained using CMA-ES. The parameters of all previously trained NCAs in the ensemble are kept frozen. The fitness is evaluated based on the performance of the full, current ensemble.
+2.  **Selection**: After the optimization step, a new population is created for the next stage using tournament selection. The new population is populated by winners of $P$ tournaments, where each winner is the best among $k$ randomly chosen individuals.
+3.  **Augmentation**: If the maximum number of NCAs has not been reached, each ensemble in the new population is augmented with a new, identity NCA (one that simply outputs its input). This new NCA will be trained in the next stage.
+
+This cycle of optimization, selection, and augmentation continues until the ensembles reach the desired length. The final result is a population of trained multi-NCA ensembles. During inference, each ensemble in the population produces a candidate solution, and the final answer is determined by a majority vote over these candidates. This mitigates overfitting introduced by the search algorithm.
+
+### Regularizing the Fitness Function
+
+While the pixelwise MSE is a good starting point, it can favor complex and unstable NCAs. To guide the evolutionary search towards simpler and more robust solutions, let's augment the fitness function with several regularization terms. These penalties discourage undesirable behaviors like oscillation, non-convergence, and overly large weights.
+
+The total loss for a training example is now a weighted sum of the original MSE and these regularization terms. The main MSE loss $\mathcal{L}_{\text{MSE}}$ is calculated on the output of the final NCA in the ensemble, as described previously.
+
+The total regularization penalty, $\mathcal{L}_{\text{reg}}$, is summed over all $L$ NCAs in the ensemble:
+$$
+\mathcal{L}_{\text{reg}} = \sum_{l=1}^{L} \left( \lambda_{\text{oscil}}\mathcal{L}^{(l)}_{\text{oscil}} + \lambda_{\text{non-conv}}\mathcal{L}^{(l)}_{\text{non-conv}} + \lambda_{L1}\mathcal{L}^{(l)}_{L1} + \lambda_{L2}\mathcal{L}^{(l)}_{L2} \right)
+$$
+where the $\lambda$ values are hyper-parameters that control the strength of each penalty.
+
+The individual penalty terms for the $l$-th NCA are:
+
+- **Oscillation Penalty ($\mathcal{L}_{\text{oscil}}$)**: To promote stable convergence, let's penalize oscillations in the substrate between the final two steps of an NCA's execution. It is defined as the mean squared difference between the substrate at step $T_l$ and $T_l-1$.
+$$
+\mathcal{L}^{(l)}_{\text{oscil}} = \frac{1}{H W C_I} \sum_{i,j,c} \left(S^{T_l,(l)}_{i,j,c} - S^{T_l-1,(l)}_{i,j,c}\right)^2
+$$
+
+- **Non-convergence Penalty ($\mathcal{L}_{\text{non-conv}}$)**: A binary penalty is applied if an NCA reaches the maximum number of steps, $T_{\text{max}}$, without converging. This speeds up training and encourages faster convergence.
+$$
+\mathcal{L}^{(l)}_{\text{non-conv}} = \mathbb{I}(T_l = T_{\text{max}})
+$$
+where $\mathbb{I}(\cdot)$ is the indicator function.
+
+- **Weight Regularization ($\mathcal{L}_{L1}$ and $\mathcal{L}_{L2}$)**: To encourage simpler rules and prevent overfitting, let's apply $L_1$ and $L_2$ regularization to the weights $W_l$ of each NCA.
+$$
+\mathcal{L}^{(l)}_{L1} = \frac{1}{|W_l|} \sum_{w \in W_l} |w|
+$$
+$$
+\mathcal{L}^{(l)}_{L2} = \frac{1}{|W_l|} \sum_{w \in W_l} w^2
+$$
+
+The total loss for a single training example is $\mathcal{L}_{\text{total}} = \mathcal{L}_{\text{MSE}} + \mathcal{L}_{\text{reg}}$. The final fitness for the CMA-ES optimizer is the negative of the mean total loss across all training examples. 
+
+## Results
+
+All experiments were conducted using identical hyperparameters and a fixed seed of 1 for reproducibility. The full experiment artifacts, including models, logs, metrics, and configurations, are publicly available in the [enca-arc-experiments](https://github.com/mmz-001/enca-arc-experiments) repository.
+
+Pass@2 accuracy is used since ARC-AGI allows two submission attempts per test grid. Since the current architecture does not support tasks with differing input and output grid sizes, these are marked as "incompatible" and receive a **score of 0**, which is factored into the overall accuracy. To avoid underestimating computational cost, the "Cost per Task" and "Time per Task" metrics are calculated exclusively over compatible tasks.
+
+I used a Google Cloud `c4a-highcpu-72` spot instance for training, which includes a 72‑core Arm®‑based CPU. At the time of writing, this costs $0.74 per hour. I suspect using energy-efficient hardware could reduce the cost by several orders of magnitude at the expense of longer training times.
+
+
+| Metric                          | ARC-AGI-1 train | ARC-AGI-1 eval | ARC-AGI-2 eval |
+| :---                            | :---            | :---           | :---           |
+| **Accuracy (pass@2)**           | 16.11%          | 4.06%          | 1.16%          |
+| Cost per Task (USD)             | 5.7e-3          | 1.1e-2         | 1.5e-2         |
+| Time per Task (s)               | 27.6            | 51.4           | 72.6           |
+| Number of Tasks                 | 400             | 400            | 120            |
+| Number of Test Grids            | 416             | 419            | 172            |
+| Solved Test Grids               | 67              | 17             | 2              |
+| Compatible Tasks                | 262             | 270            | 81             |
+| Compatible Test Grids           | 268             | 277            | 117            |
+| Accuracy (pass@2, compatible)   | 25.0%           | 6.14%          | 1.71%          |
+
+Note the reduced accuracy in ARC-AGI-1 evaluation set is due to the inclusion of harder tasks compared to the ARC-AGI-1 training set.
+
+## Analysis
+
+Let's analyze how the multi-NCA architecture solves several ARC-AGI tasks.
+
+### Task `253bf280`
+
+This task involves connecting the vertically and horizontally aligned cells. 
+
+<ARCTask id={"253bf280"} />
+
+The first NCA connects vertically aligned cells and the third NCA connects horizontally aligned cells. Other NCAs in the ensemble converge to an identity mapping, making no changes to the substrate. Initializing subsequent NCAs as identity mappings allows the ensemble to preserve an intermediate solution if the optimization process does not find a better one.
+
+<ENCA taskId={"253bf280"}/>
+
+The hidden channel sends streamers along horizontal and vertical directions until it reaches a teal cell, thereafter the green cells start growing in the opposite direction.
+
+### Task `28e73c20`
+
+For this task you need to make a specific spiral pattern.
+
+<ARCTask id={"28e73c20"} />
+
+A common feature of ENCAs is that they can grow complicated structures often generalizing to grids much larger than those in the original task.
+
+<ENCA taskId={"28e73c20"}/>
+
+Here's the same multi-NCA on a 50x50 grid:
+
+<ENCA taskId={"28e73c20"} testIdx={1} caption={"ENCA for ARC-AGI-1 puzzle #28e73c20. Test input 0 extended"}/>
+
+### Task `0ca9ddb6`
+
+The single NCA model failed this task. However, due to evolutionary search, modified fitness function, and majority voting the multi-NCA method found a solution with only one NCA.
+
+{/* underscore to differentiate from single NCA model*/}
+<ARCTask id={"0ca9ddb6_"} />
+
+<ENCA taskId={"0ca9ddb6_"} caption={"ENCA for ARC-AGI-1 puzzle #0ca9ddb6. Test input 0"}/>
+
+
+### Task `7b6016b9`
+
+Here we see that ENCA found a flood-fill algorithm.
+
+<ARCTask id={"7b6016b9"} />
+
+<ENCA taskId={"7b6016b9"}/>
+
+
+### Task `95990924`
+
+The solution to this task has 3 non-identity NCAs.
+
+<ARCTask id={"95990924"} />
+
+<ENCA taskId={"95990924"}/>
+
+### Task `d406998b`
+
+Can you figure out how this multi-NCA solves this task? 
+
+_Hint: look at the hidden channel._
+
+<ARCTask id={"d406998b"} />
+
+<ENCA taskId={"d406998b"}/>
+
+### Task `d9f24cd1`
+
+This one is interesting because it's exactly how I would visualize solving this problem.
+
+<ARCTask id={"d9f24cd1"} />
+
+<ENCA taskId={"d9f24cd1"}/>
+
+### Task `d4f3cd78`
+
+This one fails to generalize to the test input because it hasn't seen a rotated version of the input during training. ENCA has little to no human priors, making it unsuitable for certain kinds of ARC-AGI tasks. However, augmenting the dataset can help imbue these priors.
+
+<ARCTask id={"d4f3cd78"} />
+
+We can obtain the correct solution if we rotate the test input grid.
+
+<ENCA taskId={"d4f3cd78"}/>
+
+### Task `63613498`
+
+NCAs can only see their immediate neighborhood so conveying information across large grid distances is difficult. This task requires coloring the shape that matches the one inside the gray box, which requires the NCA to transmit multiple bits of information across multiple cells to several places - a difficult but doable task[^13]. The ARC-AGI-2 benchmark consists mostly of these tasks, which explains ENCA's poor performance on it.
+
+<ARCTask id={"63613498"} />
+
+Nevertheless, this training run successfully found the solution, likely due to the stochastic nature of the evolutionary search.
+
+<ENCA taskId={"63613498"}/>
+
+
+
+[^1]: [Digital Clock in CGoL - Youtube](https://www.youtube.com/watch?v=3NDAZ5g4EuU)
+[^2]: [Life in Life - Youtube](https://www.youtube.com/watch?v=xP5-iIeKXE8)
+[^3]: Grid indices are omitted for clarity
+[^4]: [Growing Neural Cellular Automata](https://distill.pub/2020/growing-ca/)
+[^5]: [Neural Cellular Maze Solver](https://umu1729.github.io/pages-neural-cellular-maze-solver/)
+[^6]: [Self-classifying MNIST Digits](https://distill.pub/2020/selforg/mnist/)
+[^7]: [Image Generation With Neural Cellular Automatas](https://arxiv.org/abs/2010.04949)
+[^8]: [ARC-NCA: Towards Developmental Solutions to the Abstraction and Reasoning Corpus](https://arxiv.org/abs/2505.08778)
+[^9]: [Neural Cellular Automata for ARC-AGI](https://arxiv.org/abs/2506.15746)
+[^10]: ARC-AGI-1 training set consists of 400 tasks and 416 test grids since some tasks have more than one test grid.
+[^11]: A simple fix is padding input and output grids to a maximum size of 30 x 30 using a new channel for padding. 
+[^12]: ENCA inference is fast enough to run on the browser and the model weights are minuscule - even smaller than the problem grids in some cases!
+[^13]: [Growing-Neural-Cellular-Automata-Pytorch](https://github.com/PWhiddy/Growing-Neural-Cellular-Automata-Pytorch) has an example of copying matrices and performing matrix multiplication using NCAs.
